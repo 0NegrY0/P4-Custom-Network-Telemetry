@@ -64,6 +64,10 @@ header int_slave_t {
     egress_metadata_t     egressMeta;
 }
 
+struct metadata {
+    bit<32> slave_count; // Contador para controlar o loop do parser
+}
+
 struct headers {
     ethernet_t            ethernet;
     ipv4_t                ipv4;
@@ -102,20 +106,30 @@ parser MyParser(packet_in packet,
 
     state parse_int_master {
         packet.extract(hdr.int_master);
-        // Se houver filhos registrados, vai para o estado de extração dinâmica
-        transition select(hdr.int_master.numSlave) {
-            0: accept;
-            default: parse_int_slave;
+        meta.slave_count = 0; // Inicializa o contador do loop
+        
+        // Se a quantidade for zero, vai direto pro fim. Senão, inicia o loop.
+        transition select(hdr.int_master.numSlave == 0) {
+            true: accept;
+            false: parse_int_slaves_loop;
         }
     }
 
-    state parse_int_slave {
-        // Primitiva de Parser do P4_16 que extrai um número variável de cabeçalhos de uma vez
-        // baseada no valor armazenado em hdr.int_master.numSlave
-        packet.extract(hdr.int_slave, hdr.int_master.numSlave);
-        transition accept;
+    // Loop que extrai dinamicamente a quantidade exata de saltos
+    state parse_int_slaves_loop {
+        
+        // O '.next' diz ao compilador para extrair 1 único cabeçalho e colocá-lo 
+        // na próxima posição disponível da pilha (hdr.int_slave)
+        packet.extract(hdr.int_slave.next);
+        
+        meta.slave_count = meta.slave_count + 1; // Incrementa o contador
+        
+        // Verifica se já leu a quantidade informada no Master Header
+        transition select(meta.slave_count == hdr.int_master.numSlave) {
+            true: accept;                  // Leu tudo, aceita o pacote
+            false: parse_int_slaves_loop;  // Ainda faltam saltos, repete o loop
+        }
     } 
-
 }
 
 /*************************************************************************
