@@ -1,4 +1,4 @@
-* -*- P4_16 -*- */
+/* -*- P4_16 -*- */
 #include <core.p4>
 #include <v1model.p4>
 
@@ -105,7 +105,7 @@ parser MyParser(packet_in packet,
         // Se houver filhos registrados, vai para o estado de extração dinâmica
         transition select(hdr.int_master.numSlave) {
             0: accept;
-            default: parse_int_slaves;
+            default: parse_int_slave;
         }
     }
 
