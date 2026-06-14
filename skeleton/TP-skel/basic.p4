@@ -186,54 +186,44 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    
-    action add_int_hop(bit<32> switch_id) {
-        
-        // Requisito 1: Inicializa o Master Header se for o primeiro salto
-        if (!hdr.int_master.isValid()) {
-            hdr.int_master.setValid();
-            hdr.int_master.numSlave = 0;
-            hdr.int_master.sizeSlave = 24; // O cabeçalho int_slave_t possui 24 bytes (192 bits)
-            hdr.ipv4.protocol = IP_PROTO_INT;
-            
-            // Adiciona o tamanho do Master Header (8 bytes) ao total do IPv4
-            hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8; 
-        }
-
-        bit<32> current_hop = hdr.int_master.numSlave;
-        
-        // Requisito 2 e 3: Inserção e preenchimento do cabeçalho filho no Egress
-        if (current_hop < MAX_HOPS) {
-            hdr.int_slave[current_hop].setValid();
-            
-            hdr.int_slave[current_hop].switchMeta.id = switch_id;
-            hdr.int_slave[current_hop].ingressMeta.port = (bit<32>)standard_metadata.ingress_port;
-            hdr.int_slave[current_hop].ingressMeta.timestamp = (bit<48>)standard_metadata.ingress_global_timestamp;
-            hdr.int_slave[current_hop].egressMeta.port = (bit<32>)standard_metadata.egress_port;
-            
-            // O V1Model expõe o timestamp do Egress (já que estamos no bloco de Egress)
-            hdr.int_slave[current_hop].egressMeta.timestamp = (bit<48>)standard_metadata.egress_global_timestamp;
-            
-            // Atualiza os contadores
-            hdr.int_master.numSlave = current_hop + 1;
-            
-            // Adiciona o tamanho do Slave Header dinamicamente ao comprimento total do IP
-            hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)hdr.int_master.sizeSlave;
-        }
-    }
-
-    table configure_int {
-        actions = {
-            add_int_hop;
-            NoAction;
-        }
-        default_action = NoAction();
-    }
-
+                 
     apply {
-        // Aplica o mecanismo INT a qualquer pacote IPv4 não dropado
+        // Aplica a telemetria INT diretamente a qualquer pacote IPv4 não dropado
+        // BURLANDO a necessidade de tabelas externas (Control Plane)
         if (hdr.ipv4.isValid() && standard_metadata.egress_spec != 511) {
-            configure_int.apply();
+            
+            // Requisito 1: Inicializa o Master Header se for o primeiro salto
+            if (!hdr.int_master.isValid()) {
+                hdr.int_master.setValid();
+                hdr.int_master.numSlave = 0;
+                hdr.int_master.sizeSlave = 24; // 24 bytes para cada filho
+                hdr.ipv4.protocol = 253; // IP_PROTO_INT (0xFD)
+                
+                // Adiciona o tamanho do Master Header (8 bytes) ao IPv4
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8; 
+            }
+
+            bit<32> current_hop = hdr.int_master.numSlave;
+            
+            // Requisito 2 e 3: Inserção do cabeçalho filho no Egress
+            if (current_hop < MAX_HOPS) {
+                hdr.int_slave[current_hop].setValid();
+                
+                // ID fixo ou derivado do MAC, já que não temos o Control Plane
+                hdr.int_slave[current_hop].switchMeta.id = 999; 
+                
+                hdr.int_slave[current_hop].ingressMeta.port = (bit<32>)standard_metadata.ingress_port;
+                hdr.int_slave[current_hop].ingressMeta.timestamp = (bit<48>)standard_metadata.ingress_global_timestamp;
+                
+                hdr.int_slave[current_hop].egressMeta.port = (bit<32>)standard_metadata.egress_port;
+                hdr.int_slave[current_hop].egressMeta.timestamp = (bit<48>)standard_metadata.egress_global_timestamp;
+                
+                // Atualiza os contadores
+                hdr.int_master.numSlave = current_hop + 1;
+                
+                // Atualiza tamanho total do IP
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)hdr.int_master.sizeSlave;
+            }
         }
     }
 }
