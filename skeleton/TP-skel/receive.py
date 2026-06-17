@@ -1,86 +1,66 @@
 #!/usr/bin/env python3
 import os
 import sys
-from scapy.all import IP, sniff, hexdump
+import struct
+from scapy.all import sniff, send, hexdump, IP, ICMP
 
-# Protocolo customizado definido no basic.p4
-IP_PROTO_INT = 253 # 0xFD
+IP_PROTO_INT = 253
 
 def handle_pkt(pkt):
-    # Verifica se o pacote tem a camada IP e usa o protocolo INT
+    # Captura apenas pacotes que possuem o Shim Header de INT
     if IP in pkt and pkt[IP].proto == IP_PROTO_INT:
         print("\n" + "="*60)
-        print("### [ PACOTE DE TELEMETRIA INT RECEBIDO ] ###")
+        print("### [ PACOTE COM TELEMETRIA (SHIM HEADER) ] ###")
+        print(f"Origem: {pkt[IP].src} -> Destino: {pkt[IP].dst}")
         
-        # O payload do IP contém o cabeçalho Master, a pilha de Slaves e o payload original
         raw_data = bytes(pkt[IP].payload)
-        
-        if len(raw_data) < 8:
-            print("Aviso: Payload muito curto para conter o cabeçalho INT Master.")
+        if len(raw_data) < 4:
             return
 
-        # 1. Extração do Cabeçalho INT Master (8 bytes no total)
-        # sizeSlave (32 bits = 4 bytes) | numSlave (32 bits = 4 bytes)
-        size_slave = int.from_bytes(raw_data[0:4], byteorder='big')
-        num_slave = int.from_bytes(raw_data[4:8], byteorder='big')
-        
-        print(f"MASTER HEADER -> Tamanho do Slave: {size_slave} bytes | Total de Saltos: {num_slave}")
+        # 1. Extração do Master Header (4 bytes no total)
+        # Formato '!BBH' = Unsigned Char(1b), Unsigned Char(1b), Unsigned Short(2b)
+        next_proto, num_slave, int_length = struct.unpack("!BBH", raw_data[:4])
+        print(f"-> Protocolo Oculto (Original): {next_proto} | Saltos Registrados: {num_slave}")
         print("-" * 60)
         
-        offset = 8
-        
-        # 2. Iteração sobre a pilha de cabeçalhos INT Slave
+        # 2. Extração Iterativa dos Slaves (8 bytes cada)
+        offset = 4
         for i in range(num_slave):
-            if len(raw_data) < offset + size_slave:
-                print(f"Erro: Dados truncados. Não foi possível ler o salto {i+1}.")
+            if offset + 8 > len(raw_data):
                 break
-                
-            slave_data = raw_data[offset : offset + size_slave]
+            # Formato '!HBBI' = Short(2b), Char(1b), Char(1b), Int(4b)
+            sw_id, in_port, eg_port, ts = struct.unpack("!HBBI", raw_data[offset:offset+8])
+            print(f"  [Salto {i+1}] Switch ID: {sw_id} | In: {in_port} | Out: {eg_port} | TS(us): {ts}")
+            offset += 8
             
-            # Extraindo os dados do slave com base no P4 (Total 24 bytes):
-            # 0-4   (32 bits): switch_id
-            # 4-8   (32 bits): ingress_port
-            # 8-14  (48 bits): ingress_timestamp (Lido em 6 bytes)
-            # 14-18 (32 bits): egress_port
-            # 18-24 (48 bits): egress_timestamp  (Lido em 6 bytes)
-            
-            sw_id = int.from_bytes(slave_data[0:4], byteorder='big')
-            in_port = int.from_bytes(slave_data[4:8], byteorder='big')
-            in_ts = int.from_bytes(slave_data[8:14], byteorder='big')
-            eg_port = int.from_bytes(slave_data[14:18], byteorder='big')
-            eg_ts = int.from_bytes(slave_data[18:24], byteorder='big')
-            
-            print(f"  [Salto {i+1}] Switch ID: {sw_id}")
-            print(f"      Porta de Entrada : {in_port} \t| Ingress Timestamp (us): {in_ts}")
-            print(f"      Porta de Saída   : {eg_port} \t| Egress Timestamp (us) : {eg_ts}")
-            
-            offset += size_slave
-            
-        # 3. Exibindo o payload (mensagem) da aplicação
-        original_payload = raw_data[offset:]
+        # 3. Separando o Payload original
+        original_payload = raw_data[int_length:]
+        
         print("-" * 60)
-        try:
-            # Tenta decodificar como texto puro (comportamento padrão do send.py)
-            mensagem = original_payload.decode('utf-8')
-            print(f"Mensagem da Aplicação: {mensagem}")
-        except Exception:
-            print("Payload Original (Hex/Binário):")
-            hexdump(original_payload)
+        # 4. A mágica para o terminal não travar: responder o ping artificialmente!
+        if next_proto == 1 and len(original_payload) > 0:
+            icmp_layer = ICMP(original_payload)
+            if icmp_layer.type == 8: # 8 é o Echo Request do Ping
+                print("-> PING (ICMP) detectado no payload original!")
+                print("-> receive.py: Forjando e enviando a resposta (Echo Reply) silenciosamente...")
+                # Cria a resposta do ping e a envia de volta
+                reply = IP(src=pkt[IP].dst, dst=pkt[IP].src) / ICMP(type=0, id=icmp_layer.id, seq=icmp_layer.seq) / icmp_layer.payload
+                send(reply, verbose=False)
+                
+        elif next_proto == 6:
+            print("-> Payload TCP puro detectado no fim do cabeçalho.")
+        elif next_proto == 17:
+            print("-> Payload UDP puro detectado no fim do cabeçalho.")
         
         print("="*60 + "\n")
 
 def main():
-    # Obtém as interfaces ethernet ativas no Mininet
     ifaces = [i for i in os.listdir('/sys/class/net/') if 'eth' in i]
     if not ifaces:
-        print("Nenhuma interface 'eth' encontrada para escuta.")
         sys.exit(1)
-        
     iface = ifaces[0]
-    print(f"Aguardando pacotes de telemetria na interface: {iface} ...")
+    print(f"Sniffing na interface {iface} aguardando cabeçalhos INT...")
     sys.stdout.flush()
-    
-    # Inicia a captura filtrando as requisições em tempo real
     sniff(iface=iface, prn=lambda x: handle_pkt(x))
 
 if __name__ == '__main__':

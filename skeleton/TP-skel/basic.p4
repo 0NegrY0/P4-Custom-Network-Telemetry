@@ -3,11 +3,8 @@
 #include <v1model.p4>
 
 const bit<16> TYPE_IPV4 = 0x0800;
-const bit<8>  IP_PROTO_INT = 0xFD; // Protocolo customizado para indicar pacote INT
-
-// O compilador exige um teto de alocação de memória na pilha, 
-// mas o parser será dinâmico usando o numSlave.
-const bit<32> MAX_HOPS = 255;
+const bit<8>  IP_PROTO_INT = 253; // Número de protocolo customizado para o nosso Shim Header
+const bit<32> MAX_HOPS = 255;      // Agora podemos usar quantos saltos quisermos!
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -38,41 +35,30 @@ header ipv4_t {
     ip4Addr_t dstAddr;
 }
 
+// MASTER - Cabeçalho interno logo após o IP (4 bytes)
 header int_master_t {
-    bit<32>   sizeSlave;
-    bit<32>   numSlave;
+    bit<8>  next_proto; // Guarda o protocolo original (1=ICMP, 6=TCP, 17=UDP)
+    bit<32>  num_slave;
+    bit<16> int_length; // Tamanho de toda a telemetria (Master + Slaves)
 }
 
-struct switch_metadata_t {
-    bit<32>     id;
-}
-
-struct ingress_metadata_t {
-    bit<32>     port;
-    bit<48>     timestamp;
-}
-
-struct egress_metadata_t {
-    bit<32>     port;
-    bit<48>     timestamp;
-}
-
-// 4 bytes (id) + 10 bytes (ingress) + 10 bytes (egress) = 24 bytes (192 bits)
+// SLAVE - O salto propriamente dito (8 bytes)
 header int_slave_t {
-    switch_metadata_t     switchMeta;
-    ingress_metadata_t    ingressMeta;
-    egress_metadata_t     egressMeta;
+    bit<16> switch_id;
+    bit<8>  ingress_port;
+    bit<8>  egress_port;
+    bit<32> timestamp;
 }
 
 struct metadata {
-    bit<32> slave_count; // Contador para controlar o loop do parser
+    bit<32> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
 }
 
 struct headers {
     ethernet_t            ethernet;
     ipv4_t                ipv4;
     int_master_t          int_master;
-    int_slave_t[MAX_HOPS] int_slave; // Pilha de tamanho máximo alocado, mas percorrida dinamicamente
+    int_slave_t[MAX_HOPS] int_slave;
 }
 
 /*************************************************************************
@@ -87,7 +73,6 @@ parser MyParser(packet_in packet,
     state start {
         transition parse_ethernet;
     }
-
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
@@ -95,39 +80,28 @@ parser MyParser(packet_in packet,
             default: accept;
         }
     }
-
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
+        // Desvia para o parser de telemetria se o protocolo for 253
         transition select(hdr.ipv4.protocol) {
             IP_PROTO_INT: parse_int_master;
             default: accept;
         }
     }
-
     state parse_int_master {
         packet.extract(hdr.int_master);
-        meta.slave_count = 0; // Inicializa o contador do loop
-        
-        // Se a quantidade for zero, vai direto pro fim. Senão, inicia o loop.
-        transition select(hdr.int_master.numSlave == 0) {
-            true: accept;
-            false: parse_int_slaves_loop;
+        meta.slave_count = 0;
+        transition select(hdr.int_master.num_slave) {
+            0: accept;
+            default: parse_int_slaves_loop;
         }
     }
-
-    // Loop que extrai dinamicamente a quantidade exata de saltos
     state parse_int_slaves_loop {
-        
-        // O '.next' diz ao compilador para extrair 1 único cabeçalho e colocá-lo 
-        // na próxima posição disponível da pilha (hdr.int_slave)
         packet.extract(hdr.int_slave.next);
-        
-        meta.slave_count = meta.slave_count + 1; // Incrementa o contador
-        
-        // Verifica se já leu a quantidade informada no Master Header
-        transition select(meta.slave_count == hdr.int_master.numSlave) {
-            true: accept;                  // Leu tudo, aceita o pacote
-            false: parse_int_slaves_loop;  // Ainda faltam saltos, repete o loop
+        meta.slave_count = meta.slave_count + 1;
+        transition select(meta.slave_count == hdr.int_master.num_slave) {
+            true: accept;
+            false: parse_int_slaves_loop;
         }
     } 
 }
@@ -188,41 +162,33 @@ control MyEgress(inout headers hdr,
                  inout standard_metadata_t standard_metadata) {
                  
     apply {
-        // Aplica a telemetria INT diretamente a qualquer pacote IPv4 não dropado
-        // BURLANDO a necessidade de tabelas externas (Control Plane)
         if (hdr.ipv4.isValid() && standard_metadata.egress_spec != 511) {
             
-            // Requisito 1: Inicializa o Master Header se for o primeiro salto
+            // 1. O primeiro salto "empurra" o protocolo original e insere o Master
             if (!hdr.int_master.isValid()) {
                 hdr.int_master.setValid();
-                hdr.int_master.numSlave = 0;
-                hdr.int_master.sizeSlave = 24; // 24 bytes para cada filho
-                hdr.ipv4.protocol = 253; // IP_PROTO_INT (0xFD)
+                hdr.int_master.next_proto = hdr.ipv4.protocol; // Salva quem estava por baixo (ICMP, TCP...)
+                hdr.int_master.num_slave = 0;
+                hdr.int_master.int_length = 4; // 4 bytes do próprio master
                 
-                // Adiciona o tamanho do Master Header (8 bytes) ao IPv4
-                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8; 
+                hdr.ipv4.protocol = IP_PROTO_INT; // Altera o protocolo do IPv4
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 4;
             }
 
-            bit<32> current_hop = hdr.int_master.numSlave;
+            bit<32> current_hop = (bit<32>)hdr.int_master.num_slave;
             
-            // Requisito 2 e 3: Inserção do cabeçalho filho no Egress
+            // 2. Insere os filhos dinamicamente
             if (current_hop < MAX_HOPS) {
                 hdr.int_slave[current_hop].setValid();
+                hdr.int_slave[current_hop].switch_id = 999; // Usando fixo para bypassar control plane
+                hdr.int_slave[current_hop].ingress_port = (bit<8>)standard_metadata.ingress_port;
+                hdr.int_slave[current_hop].egress_port = (bit<8>)standard_metadata.egress_port;
+                hdr.int_slave[current_hop].timestamp = (bit<32>)standard_metadata.egress_global_timestamp;
                 
-                // ID fixo ou derivado do MAC, já que não temos o Control Plane
-                hdr.int_slave[current_hop].switchMeta.id = 999; 
+                hdr.int_master.num_slave = (bit<32>)(current_hop + 1);
+                hdr.int_master.int_length = hdr.int_master.int_length + 8; // Adiciona os 8 bytes do slave
                 
-                hdr.int_slave[current_hop].ingressMeta.port = (bit<32>)standard_metadata.ingress_port;
-                hdr.int_slave[current_hop].ingressMeta.timestamp = (bit<48>)standard_metadata.ingress_global_timestamp;
-                
-                hdr.int_slave[current_hop].egressMeta.port = (bit<32>)standard_metadata.egress_port;
-                hdr.int_slave[current_hop].egressMeta.timestamp = (bit<48>)standard_metadata.egress_global_timestamp;
-                
-                // Atualiza os contadores
-                hdr.int_master.numSlave = current_hop + 1;
-                
-                // Atualiza tamanho total do IP
-                hdr.ipv4.totalLen = hdr.ipv4.totalLen + (bit<16>)hdr.int_master.sizeSlave;
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8;
             }
         }
     }
