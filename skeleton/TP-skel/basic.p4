@@ -4,7 +4,7 @@
 
 const bit<16> TYPE_IPV4 = 0x0800;
 const bit<8>  IP_PROTO_INT = 253; // Número de protocolo customizado para o nosso Shim Header
-const bit<32> MAX_HOPS = 255;      // Agora podemos usar quantos saltos quisermos!
+const bit<8> MAX_HOPS = 255;      // Agora podemos usar quantos saltos quisermos!
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -38,7 +38,7 @@ header ipv4_t {
 // MASTER - Cabeçalho interno logo após o IP (4 bytes)
 header int_master_t {
     bit<8>  next_proto; // Guarda o protocolo original (1=ICMP, 6=TCP, 17=UDP)
-    bit<32>  num_slave;
+    bit<8>  num_slave;
     bit<16> int_length; // Tamanho de toda a telemetria (Master + Slaves)
 }
 
@@ -51,7 +51,7 @@ header int_slave_t {
 }
 
 struct metadata {
-    bit<32> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
+    bit<8> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
 }
 
 struct headers {
@@ -175,7 +175,7 @@ control MyEgress(inout headers hdr,
                 hdr.ipv4.totalLen = hdr.ipv4.totalLen + 4;
             }
 
-            bit<32> current_hop = (bit<32>)hdr.int_master.num_slave;
+            bit<8> current_hop = hdr.int_master.num_slave;
             
             // 2. Insere os filhos dinamicamente
             if (current_hop < MAX_HOPS) {
@@ -185,7 +185,7 @@ control MyEgress(inout headers hdr,
                 hdr.int_slave[current_hop].egress_port = (bit<8>)standard_metadata.egress_port;
                 hdr.int_slave[current_hop].timestamp = (bit<32>)standard_metadata.egress_global_timestamp;
                 
-                hdr.int_master.num_slave = (bit<32>)(current_hop + 1);
+                hdr.int_master.num_slave = (current_hop + 1);
                 hdr.int_master.int_length = hdr.int_master.int_length + 8; // Adiciona os 8 bytes do slave
                 
                 hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8;
