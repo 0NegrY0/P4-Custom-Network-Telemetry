@@ -4,7 +4,7 @@
 
 const bit<16> TYPE_IPV4 = 0x0800;
 const bit<8>  IP_PROTO_INT = 253; // Número de protocolo customizado para o nosso Shim Header
-const bit<32> MAX_HOPS = 255;      // Agora podemos usar quantos saltos quisermos!
+const bit<8> MAX_HOPS = 255;      // Agora podemos usar quantos saltos quisermos!
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -38,7 +38,7 @@ header ipv4_t {
 // MASTER - Cabeçalho interno logo após o IP (4 bytes)
 header int_master_t {
     bit<8>  next_proto; // Guarda o protocolo original (1=ICMP, 6=TCP, 17=UDP)
-    bit<32>  num_slave;
+    bit<8>  num_slave;
     bit<16> int_length; // Tamanho de toda a telemetria (Master + Slaves)
 }
 
@@ -51,7 +51,8 @@ header int_slave_t {
 }
 
 struct metadata {
-    bit<32> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
+    bit<8> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
+    bit<1> is_sink;        // Flag para indicar se o destino é um "sink" (sem resposta)
 }
 
 struct headers {
@@ -133,12 +134,21 @@ control MyIngress(inout headers hdr,
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
+    action ipv4_forward_sink(macAddr_t dstAddr, egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
+        hdr.ethernet.dstAddr = dstAddr;
+        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+        meta.is_sink = 1; // Marca o pacote para remoção do INT no egress
+    }
+
     table ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
         }
         actions = {
             ipv4_forward;
+            ipv4_forward_sink;
             drop;
             NoAction;
         }
@@ -162,35 +172,40 @@ control MyEgress(inout headers hdr,
                  inout standard_metadata_t standard_metadata) {
                  
     apply {
-        if (hdr.ipv4.isValid() && standard_metadata.egress_spec != 511) {
+        // Verifica se o IPv4 é válido e se o pacote não vai ser descartado
+        // E CRUCIALMENTE: Só aplica INT se o protocolo for estritamente TCP (6) ou UDP (17)
+        if (hdr.ipv4.isValid() && standard_metadata.egress_spec != 511 && 
+            (hdr.ipv4.protocol == 6 || hdr.ipv4.protocol == 17 || hdr.ipv4.protocol == IP_PROTO_INT)) {
             
-            // 1. O primeiro salto "empurra" o protocolo original e insere o Master
+            // --- TRÁFEGO DE APLICAÇÃO ALVO (TCP/UDP) ---
+            // O switch insere a telemetria normalmente aqui
+            
             if (!hdr.int_master.isValid()) {
                 hdr.int_master.setValid();
-                hdr.int_master.next_proto = hdr.ipv4.protocol; // Salva quem estava por baixo (ICMP, TCP...)
+                hdr.int_master.next_proto = hdr.ipv4.protocol; // Salva o original (6 ou 17)
                 hdr.int_master.num_slave = 0;
-                hdr.int_master.int_length = 4; // 4 bytes do próprio master
+                hdr.int_master.int_length = 4;
                 
-                hdr.ipv4.protocol = IP_PROTO_INT; // Altera o protocolo do IPv4
+                hdr.ipv4.protocol = IP_PROTO_INT; // Altera para o protocolo customizado 253
                 hdr.ipv4.totalLen = hdr.ipv4.totalLen + 4;
             }
 
-            bit<32> current_hop = (bit<32>)hdr.int_master.num_slave;
+            bit<8> current_hop = hdr.int_master.num_slave;
             
-            // 2. Insere os filhos dinamicamente
             if (current_hop < MAX_HOPS) {
                 hdr.int_slave[current_hop].setValid();
-                hdr.int_slave[current_hop].switch_id = 999; // Usando fixo para bypassar control plane
+                hdr.int_slave[current_hop].switch_id = 999; 
                 hdr.int_slave[current_hop].ingress_port = (bit<8>)standard_metadata.ingress_port;
                 hdr.int_slave[current_hop].egress_port = (bit<8>)standard_metadata.egress_port;
                 hdr.int_slave[current_hop].timestamp = (bit<32>)standard_metadata.egress_global_timestamp;
                 
-                hdr.int_master.num_slave = (bit<32>)(current_hop + 1);
-                hdr.int_master.int_length = hdr.int_master.int_length + 8; // Adiciona os 8 bytes do slave
+                hdr.int_master.num_slave = (current_hop + 1);
+                hdr.int_master.int_length = hdr.int_master.int_length + 8;
                 
                 hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8;
             }
         }
+        // Qualquer outro protocolo (ICMP, OSPF, etc.) cai aqui fora e passa 100% intocado!
     }
 }
 
@@ -226,6 +241,9 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
+        
+        // packet.emit natively checks .isValid() under the hood. 
+        // If we invalidated int_master in Egress, these are safely ignored!
         packet.emit(hdr.int_master);
         packet.emit(hdr.int_slave);
     }
