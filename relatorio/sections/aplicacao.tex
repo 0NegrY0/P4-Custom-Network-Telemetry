@@ -1,0 +1,7 @@
+Os \textit{scripts} de transmissão (\texttt{send.py}) e recepção (\texttt{receive.py}) foram integralmente reescritos para operar como \textit{Dashboards} em interfaces TUI (\textit{Text User Interface}).
+
+\begin{itemize}
+    \item \textbf{Transmissor:} Descobre dinamicamente a rede à qual pertence, monta o cabeçalho de enlace (MAC) apontando para o seu \textit{gateway} (Switch) de forma autônoma sem o uso de endereços de \textit{broadcast}, e injeta pacotes TCP portando mensagens em texto plano.
+    \item \textbf{Receptor:} Intercepta pacotes com protocolo IPv4 \texttt{253}. Realiza a decodificação da estrutura de bytes em formato \textit{Big-Endian}, separando o cabeçalho Pai, iterando sobre a memória para coletar todos os 12 bytes de cada salto, e reconstruindo a camada final de transporte para extrair o texto em claro. Os dados são dispostos em uma tabela de rastreamento de \textit{hops} atualizada em tempo real.
+\end{itemize}
+

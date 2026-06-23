@@ -1,0 +1,26 @@
+Para viabilizar a telemetria transparente, foram realizadas modificações no arquivo \texttt{basic.p4}, separadas nas seguintes etapas arquiteturais:
+
+\subsection{Estrutura dos Cabeçalhos INT}
+Foram criados dois novos tipos de cabeçalho baseados na especificação INT:
+\begin{itemize}
+    \item \textbf{INT Master (Cabeçalho Pai - 4 bytes):} Atua como o \textit{shim header}. Armazena o protocolo encapsulado original (para posterior restauração), o contador dinâmico de saltos (\texttt{num\_slave}) e o comprimento total da área de telemetria (\texttt{int\_length}).
+    \item \textbf{INT Slave (Cabeçalho Filho - 12 bytes):} Inserido por cada switch no caminho. Foi expandido além dos requisitos mínimos para armazenar:
+    \begin{itemize}
+        \item ID dinâmico do switch (2 bytes);
+        \item Porta de entrada (1 byte);
+        \item Porta de saída (1 byte);
+        \item Timestamp de entrada no formato global (4 bytes);
+        \item Tamanho total do pacote na entrada do pipeline (4 bytes).
+    \end{itemize}
+\end{itemize}
+
+\subsection{Lógica de \textit{Parsing} e \textit{Deparsing}}
+O \textit{Parser} foi atualizado para inspecionar o campo \texttt{protocol} do IPv4. Caso identifique o valor \texttt{253} (protocolo customizado para o INT local), ele desvia a extração para o \texttt{INT Master} e entra em um laço de repetição condicional (\textit{loop}) para extrair múltiplos cabeçalhos \texttt{INT Slave} com base no campo \texttt{num\_slave}. O \textit{Deparser} emite os cabeçalhos validos na ordem correta antes do \textit{payload}.
+
+\subsection{Processamento no Egress (Lista Branca e IDs Dinâmicos)}
+Afastando-se de abordagens convencionais nossa arquitetura implementou a lógica de encapsulamento estrategicamente no bloco \textbf{MyEgress}. Essa decisão permitiu duas inovações essenciais:
+
+\begin{enumerate}
+    \item \textbf{Filtro de Lista Branca (Whitelist):} O P4 foi programado para injetar cabeçalhos INT estritamente em pacotes de aplicação baseados em \textbf{TCP (6)}, \textbf{UDP (17)} ou pacotes que já contenham telemetria (Protocolo 253). Isso garante que ferramentas de controle da rede, como o Ping nativo (ICMP), transitem pela rede com 100\% de transparência, sem que seus cabeçalhos sejam adulterados.
+    \item \textbf{Dedução de ID em Tempo de Execução:} Como a arquitetura \texttt{v1model} não provê um ID estático nativo para o switch no plano de dados sem a ajuda do plano de controle, desenvolveu-se uma heurística puramente baseada em Data Plane. O switch extrai seu próprio endereço MAC dinamicamente (através de um deslocamento de \textit{bits} \texttt{>> 8} e uma máscara \texttt{\& 0xFF}) para carimbar o cabeçalho \textit{Slave} com o seu identificador real (Ex: Switch 1, 2, 3 ou 4), mantendo a topologia completamente genérica.
+\end{enumerate}

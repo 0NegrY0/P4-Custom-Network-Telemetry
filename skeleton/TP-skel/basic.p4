@@ -53,7 +53,6 @@ header int_slave_t {
 
 struct metadata {
     bit<8> slave_count;    // Contador interno para o router saber quantos slaves já inseriu
-    bit<1> is_sink;        // Flag para indicar se o destino é um "sink" (sem resposta)
 }
 
 struct headers {
@@ -135,13 +134,6 @@ control MyIngress(inout headers hdr,
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
-    action ipv4_forward_sink(macAddr_t dstAddr, egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-        hdr.ethernet.dstAddr = dstAddr;
-        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-        meta.is_sink = 1; // Marca o pacote para remoção do INT no egress
-    }
 
     table ipv4_lpm {
         key = {
@@ -149,7 +141,6 @@ control MyIngress(inout headers hdr,
         }
         actions = {
             ipv4_forward;
-            ipv4_forward_sink;
             drop;
             NoAction;
         }
@@ -174,7 +165,7 @@ control MyEgress(inout headers hdr,
                  
     apply {
         // Verifica se o IPv4 é válido e se o pacote não vai ser descartado
-        // E CRUCIALMENTE: Só aplica INT se o protocolo for estritamente TCP (6) ou UDP (17)
+        // Só aplica INT se o protocolo for estritamente TCP (6) ou UDP (17)
         if (hdr.ipv4.isValid() && standard_metadata.egress_spec != 511 && 
             (hdr.ipv4.protocol == 6 || hdr.ipv4.protocol == 17 || hdr.ipv4.protocol == IP_PROTO_INT)) {
             
@@ -207,7 +198,6 @@ control MyEgress(inout headers hdr,
                 hdr.ipv4.totalLen = hdr.ipv4.totalLen + 12;
             }
         }
-        // Qualquer outro protocolo (ICMP, OSPF, etc.) cai aqui fora e passa 100% intocado!
     }
 }
 
@@ -243,9 +233,6 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
-        
-        // packet.emit natively checks .isValid() under the hood. 
-        // If we invalidated int_master in Egress, these are safely ignored!
         packet.emit(hdr.int_master);
         packet.emit(hdr.int_slave);
     }

@@ -1,0 +1,9 @@
+A implementação da \textit{In-Band Network Telemetry} (INT) em P4 provou ser um desafio técnico altamente enriquecedor, revelando as minúcias e complexidades operacionais inerentes ao plano de dados de redes programáveis.
+
+Durante o desenvolvimento, diversas dificuldades técnicas foram encontradas, sendo a principal delas a interferência inicial da telemetria no tráfego de controle da rede (como os pacotes ICMP utilizados pelo comando \texttt{ping}).
+
+Outro desafio significativo foi a atribuição de identificadores aos switches sem violar a regra de manter a topologia genérica e não adulterar o plano de controle (\textit{Control Plane}). 
+
+Como ganho educacional, o trabalho consolidou de forma prática os conceitos de \textit{Software-Defined Networking} (SDN) e a separação dos planos de rede. Os conhecimentos sobre o encapsulamento estrutural de protocolos, a manipulação de pacotes byte a byte via código e a interação entre a camada de enlace e de rede foram aprofundados.
+
+Por fim, a integração do plano de dados em P4 com a criação de \textit{dashboards} interativos via \textit{scripts} Python conectou a lógica de baixo nível dos switches BMv2 com a visualização de telemetria em alto nível. Isso proporcionou uma visão moderna de como monitoramento em tempo real.
