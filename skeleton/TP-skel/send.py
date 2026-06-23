@@ -55,10 +55,23 @@ def main():
         print(f"\n Erro: Nao foi possivel resolver o nome do host '{host_input}'")
         exit(1)
 
-    # MONTACEM DO PACOTE (Identica a original)
-    pkt = Ether(src=local_mac, dst='ff:ff:ff:ff:ff:ff')
-    pkt = pkt / IP(dst=addr) / TCP(dport=dport, sport=sport) / mensagem
+    # # MONTACEM DO PACOTE (Identica a original)
+    # pkt = Ether(src=local_mac, dst='ff:ff:ff:ff:ff:ff')
+    # pkt = pkt / IP(dst=addr) / TCP(dport=dport, sport=sport) / mensagem
     
+    # sendp(pkt, iface=iface, verbose=False)
+    
+    
+   # 1. Extrai o terceiro octeto do IP local (ex: tira o '1' de 10.0.1.1)
+    id_rede = local_ip.split('.')[2]
+    
+    # 2. Monta o MAC do Switch (Gateway) dinamicamente!
+    gw_mac = f"08:00:00:00:0{id_rede}:00"
+
+    # 3. Usa o MAC correto no pacote Ethernet
+    pkt = Ether(src=local_mac, dst=gw_mac) / IP(dst=addr) / TCP(dport=dport, sport=sport) / mensagem
+    
+    # 4. Envia na camada 2 com sendp
     sendp(pkt, iface=iface, verbose=False)
 
     # RENDERIZACAO DA TUI LIMPA

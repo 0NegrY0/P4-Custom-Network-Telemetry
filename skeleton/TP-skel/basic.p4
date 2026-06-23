@@ -48,6 +48,7 @@ header int_slave_t {
     bit<8>  ingress_port;
     bit<8>  egress_port;
     bit<32> timestamp;
+    bit<32> packet_length; 
 }
 
 struct metadata {
@@ -194,15 +195,16 @@ control MyEgress(inout headers hdr,
             
             if (current_hop < MAX_HOPS) {
                 hdr.int_slave[current_hop].setValid();
-                hdr.int_slave[current_hop].switch_id = 999; 
+                hdr.int_slave[current_hop].switch_id = (bit<16>) ((hdr.ethernet.srcAddr >> 8) & 0xFF); //derivando switch_id do MAC de origem 
                 hdr.int_slave[current_hop].ingress_port = (bit<8>)standard_metadata.ingress_port;
                 hdr.int_slave[current_hop].egress_port = (bit<8>)standard_metadata.egress_port;
-                hdr.int_slave[current_hop].timestamp = (bit<32>)standard_metadata.egress_global_timestamp;
+                hdr.int_slave[current_hop].timestamp = (bit<32>)standard_metadata.ingress_global_timestamp;
+                hdr.int_slave[current_hop].packet_length = (bit<32>)standard_metadata.packet_length; 
                 
                 hdr.int_master.num_slave = (current_hop + 1);
-                hdr.int_master.int_length = hdr.int_master.int_length + 8;
+                hdr.int_master.int_length = hdr.int_master.int_length + 12;
                 
-                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 8;
+                hdr.ipv4.totalLen = hdr.ipv4.totalLen + 12;
             }
         }
         // Qualquer outro protocolo (ICMP, OSPF, etc.) cai aqui fora e passa 100% intocado!

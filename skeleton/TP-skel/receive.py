@@ -16,16 +16,20 @@ def handle_pkt(pkt, local_ip, iface):
         if len(raw_data) < 4:
             return
 
+        # 1. Extrai o Master Header
         next_proto, num_slave, int_length = struct.unpack("!BBH", raw_data[:4])
         
         hops_data = []
         offset = 4
         for i in range(num_slave):
-            if offset + 8 > len(raw_data):
+            # AGORA O SLAVE TEM 12 BYTES (adicionamos os 4 bytes do packet_length)
+            if offset + 12 > len(raw_data):
                 break
-            sw_id, in_port, eg_port, ts = struct.unpack("!HBBI", raw_data[offset:offset+8])
-            hops_data.append((sw_id, in_port, eg_port, ts))
-            offset += 8
+            
+            # !HBBII = Short(2) + Char(1) + Char(1) + Int(4) + Int(4) = 12 Bytes
+            sw_id, in_port, eg_port, ts, pkt_len = struct.unpack("!HBBII", raw_data[offset:offset+12])
+            hops_data.append((sw_id, in_port, eg_port, ts, pkt_len))
+            offset += 12
             
         original_payload = raw_data[int_length:]
         mensagem_app = "Nenhuma mensagem legivel encontrada."
@@ -42,22 +46,24 @@ def handle_pkt(pkt, local_ip, iface):
             if udp_layer.haslayer(Raw):
                 mensagem_app = udp_layer[Raw].load.decode('utf-8', errors='ignore')
 
-        # INTERFACE TUI TOTALMENTE LIMPA
+        # INTERFACE TUI TOTALMENTE LIMPA E EXPANDIDA
         clear_screen()
         print("╔══════════════════════════════════════════════════════════════════════════╗")
         print("║                   DASHBOARD DE TELEMETRIA INT (P4)                       ║")
         print("╠══════════════════════════════════════════════════════════════════════════╣")
         print(f"║ Interface: {iface:<12} │ IP Local: {local_ip:<39} ║")
         print("╠══════════════════════════════════════════════════════════════════════════╣")
-        print(f"║ Fluxo:      {pkt[IP].src}  -->  {pkt[IP].dst}")
-        print(f"║ Protocolo:  {proto_nome}")
-        print(f"║ Mensagem:   \"{mensagem_app}\"")
+        print(f"║ Fluxo:         {pkt[IP].src}  -->  {pkt[IP].dst}")
+        print(f"║ Protocolo:     {proto_nome}")
+        print(f"║ INT Header:    {int_length} bytes de telemetria acumulada")
+        print(f"║ Mensagem:      \"{mensagem_app}\"")
         print("╠══════════════════════════════════════════════════════════════════════════╣")
-        print("║ SALTO │ SWITCH ID │ PORTA IN │ PORTA OUT │ TIMESTAMP (Microsegundos)     ║")
-        print("╟───────┼───────────┼──────────┼───────────┼───────────────────────────────╢")
+        print("║ SALTO │ SW ID │ IN │ OUT │ TIMESTAMP (us)       │ TAMANHO PACOTE (Bytes) ║")
+        print("╟───────┼───────┼────┼─────┼──────────────────────┼────────────────────────╢")
         
         for i, hop in enumerate(hops_data):
-            print(f"║  {i+1:02d}   │    {hop[0]:<7}│    {hop[1]:<6}│     {hop[2]:<6}│ {hop[3]:<30}║")
+            # Formatado matematicamente para encaixar exatos 76 caracteres na tela
+            print(f"║  {i+1:02d}   │  {hop[0]:<5}│ {hop[1]:<3}│  {hop[2]:<3}│ {hop[3]:<21}│ {hop[4]:<23}║")
             
         print("╚══════════════════════════════════════════════════════════════════════════╝")
         print("  Aguardando novos pacotes de telemetria... (Ctrl+C para sair)")
