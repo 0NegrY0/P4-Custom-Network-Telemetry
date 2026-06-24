@@ -42,7 +42,7 @@ header int_master_t {
     bit<16> int_length; // Tamanho de toda a telemetria (Master + Slaves)
 }
 
-// SLAVE - O salto propriamente dito (8 bytes)
+// SLAVE - O salto propriamente dito (12 bytes)
 header int_slave_t {
     bit<16> switch_id;
     bit<8>  ingress_port;
