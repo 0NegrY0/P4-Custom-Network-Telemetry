@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1782250514.84292 "/home/cnegri/UFRGS/Protocolos/P4-Custom-Network-Telemetry/relatorio/main.tex" "output/main.pdf" "main" 1782250515.23488 0
-  "/home/cnegri/UFRGS/Protocolos/P4-Custom-Network-Telemetry/relatorio/main.tex" 1782249782.02856 1150 97cf6933516c28e1a3e0134b9ea1205b ""
+["pdflatex"] 1782263442.09706 "/home/cnegri/UFRGS/Protocolos/P4-Custom-Network-Telemetry/relatorio/main.tex" "output/main.pdf" "main" 1782263442.56628 0
+  "/home/cnegri/UFRGS/Protocolos/P4-Custom-Network-Telemetry/relatorio/main.tex" 1782263441.5112 1178 4d8922bae1b9478a32be6ca1c380d1f4 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1136849721 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/tcrm1200.tfm" 1136768653 1536 74b7293ec3713bb7fdca8dd1bd1f469c ""
@@ -67,12 +67,12 @@
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1781319772 3520814 56d6d9579007a4c30c4b05921e28d6bc ""
   "figures/print.jpeg" 1782249804.52862 214430 da81d096ba004b63f7a0c4fa9f6bfb30 ""
   "figures/topologia_draw_io.jpg" 1782247897.33978 42583 d2679bc1793000466d3258f45407a6d0 ""
-  "main.tex" 1782249782.02856 1150 97cf6933516c28e1a3e0134b9ea1205b ""
-  "output/main.aux" 1782250515.19519 1478 572858c1fad13837a58b0ee7fa893c75 "pdflatex"
-  "output/main.out" 1782250515.19519 1596 86234cf9bf6bb25b2426e6e7abe2569f "pdflatex"
+  "main.tex" 1782263441.5112 1178 4d8922bae1b9478a32be6ca1c380d1f4 ""
+  "output/main.aux" 1782263442.51424 1478 572858c1fad13837a58b0ee7fa893c75 "pdflatex"
+  "output/main.out" 1782263442.51424 1596 86234cf9bf6bb25b2426e6e7abe2569f "pdflatex"
   "sections/aplicacao.tex" 1782249657.68616 958 aadb86c57959c2505cdec4658cfd517b ""
   "sections/arquitetura.tex" 1782250298.23838 2852 1be501a3372b3a13feb7ad221ca8956f ""
-  "sections/conclusao.tex" 1782250514.67951 1311 4233b44bfd70c8ba78094b0f236b6c5a ""
+  "sections/conclusao.tex" 1782250579.55266 1311 4233b44bfd70c8ba78094b0f236b6c5a ""
   "sections/objetivo.tex" 1782248406.87042 500 792e958833e45a66ac7c69c43eac2442 ""
   "sections/topologia.tex" 1782250360.89333 1050 4b0c548df669c60b152a115205a892a2 ""
   (generated)
